@@ -31,7 +31,6 @@ class AEFDataset(Dataset):
         num_samples: int = 1000,
         patch_size: int = 128,
         num_frames: int = 16,
-        return_text: bool = False,
     ):
         """
         Initialize the dataset.
@@ -40,12 +39,10 @@ class AEFDataset(Dataset):
             num_samples (int): Number of samples in the dataset (dataset length).
             patch_size (int): Height and width of image patches (H = W).
             num_frames (int): Number of temporal frames per sample.
-            return_text (bool): If True, include a dummy text description per sample.
         """
         self.num_samples = num_samples
         self.patch_size = patch_size
         self.num_frames = num_frames
-        self.return_text = return_text
         self.input_source = ["sentinel2"]  # Only Sentinel-2 for example
 
     def __len__(self) -> int:
@@ -74,12 +71,11 @@ class AEFDataset(Dataset):
                         "sentinel2": Tensor [T]
                     },
                     "valid_period": (start_ms, end_ms),
-                    "text": Optional[str]
                 }
         """
 
         # Support period (input data range) - up to 1 year
-        support_start_ms = 1577833200000.0  # 2020-01-01 in ms
+        support_start_ms = 1577836800000.0  # 2020-01-01 in ms
         support_end_ms = support_start_ms + (365 * 24 * 3600 * 1000)  # 1 year later
 
         # Valid period (sumamry period) - can be different from support
@@ -109,9 +105,6 @@ class AEFDataset(Dataset):
             "timestamps": timestamps,
             "valid_period": (valid_start_ms, valid_end_ms),
         }
-
-        if self.return_text:
-            item["text"] = f"A satellite image of location {idx}"
 
         return item
 
@@ -150,7 +143,6 @@ def create_aef_dataloader(
         num_samples=num_samples,
         patch_size=patch_size,
         num_frames=num_frames,
-        return_text=return_text,
     )
 
     def collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -191,9 +183,6 @@ def create_aef_dataloader(
             "timestamps": collated_timestamps,
             "valid_periods": [sample["valid_period"] for sample in batch],
         }
-
-        if return_text:
-            batch_dict["texts"] = [sample["text"] for sample in batch]
 
         return batch_dict
 
@@ -295,7 +284,7 @@ class AEFNPZDataset(Dataset):
         Notes:
             - Timestamps are expected to be stored as "ts_<source_name>" in the .npz file.
             - Static sources (glo30, nlcd) without timestamps use a default timestamp
-              of 1577833200000.0 (2020-01-01 in milliseconds since epoch).
+              of 1577836800000.0 (2020-01-01 in milliseconds since epoch).
             - The valid_period represents a ±180 day window around the temporal center
               of the data, useful for defining target prediction windows or data validity.
         """
@@ -314,15 +303,14 @@ class AEFNPZDataset(Dataset):
                     ts[source] = torch.from_numpy(data[ts_key].astype(np.float32))
                 elif source in {"glo30", "nlcd"}:
                     # Static sources - use default timestamp
-                    ts[source] = torch.tensor([1577833200000.0], dtype=torch.float32)
+                    ts[source] = torch.tensor([1577836800000.0], dtype=torch.float32)
 
         # Compute valid period from timestamps
         if ts:
-            all_ts = np.concatenate([t.numpy() for t in ts.values() if t.numel() > 0])
-            med = float(np.median(all_ts)) if len(all_ts) > 0 else 1577833200000.0
+            med = float(np.median(np.concatenate([t.numpy() for t in ts.values()])))
         else:
-            med = 1577833200000.0
-        vp = (med - 1577833200000.0, med + 1577833200000.0)  # +/- 180 days
+            med = 1577836800000.0
+        vp = (med - 15552000000.0, med + 15552000000.0)  # +/- 180 days
 
         return {"source_data": src, "timestamps": ts, "valid_period": vp}
 
